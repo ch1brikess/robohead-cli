@@ -26,6 +26,9 @@ robohead-cli/
 ### Автоматическая установка
 
 ```bash
+# Клонируйте репозиторий
+git clone https://github.com/ch1brikess/robohead-cli.git
+
 # Перейдите в директорию проекта
 cd robohead-cli
 
