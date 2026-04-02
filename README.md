@@ -1,4 +1,4 @@
-```markdown
+
 # RoboHead CLI
 
 Командная строка утилита для управления роботом RoboHead на базе ROS (Robot Operating System).
