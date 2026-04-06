@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 import argparse
 import subprocess
@@ -22,66 +21,60 @@ GRAM_FILE = VOICE_CONFIG_DIR / "gram.txt"
 DICT_FILE = VOICE_CONFIG_DIR / "dictionary.txt"
 DICT_OUTPUT_FILE = VOICE_CONFIG_DIR / "dictionary.dict"
 YAML_CONFIG = CONFIG_DIR / "robohead_controller.yaml"
-
 DICT2TRANSCRIPT_PATH = WS_ROOT / "src" / "ru4sphinx" / "text2dict" / "dict2transcript.pl"
 
-def check_ros_workspace():
+def check_ros():
     if not WS_ROOT.exists():
-        print(f"ROS workspace not found: {WS_ROOT}")
+        print(f"ROS workspace не найден: {WS_ROOT}")
         sys.exit(1)
 
-def run_cmd(cmd: str, shell=True, capture=False):
+def run_cmd(cmd):
     try:
-        result = subprocess.run(
-            cmd, shell=shell, capture_output=capture, 
-            text=True, check=True, cwd=HOME, executable='/bin/bash'
-        )
-        return result.stdout if capture else None
-    except subprocess.CalledProcessError as e:
-        print(f"Error: {e.stderr if hasattr(e, 'stderr') else e}")
+        subprocess.run(cmd, shell=True, check=True, cwd=HOME, executable='/bin/bash')
+    except Exception as e:
+        print(f"Ошибка: {e}")
         sys.exit(1)
 
-def backup_file(filepath: Path):
-    backup = filepath.with_suffix(filepath.suffix + ".bak")
-    shutil.copy2(filepath, backup)
-    print(f"Backup: {backup}")
+def backup(filepath):
+    backup_path = str(filepath) + ".bak"
+    shutil.copy2(filepath, backup_path)
+    print(f"Бэкап: {backup_path}")
 
-def cmd_core_restart(args):
-    check_ros_workspace()
+def core_restart(args):
+    check_ros()
     if args.debug:
-        cmd = f"sudo systemctl stop robohead.service && roslaunch robohead_controller robohead_controller_py.launch"
-        print(f"Debug mode: {cmd}")
-        if input("Execute? (y/n): ").lower() == 'y':
+        cmd = "sudo systemctl stop robohead.service && roslaunch robohead_controller robohead_controller_py.launch"
+        print(f"Режим отладки: {cmd}")
+        if input("Выполнить? (y/n): ").lower() == 'y':
             run_cmd(cmd)
     else:
-        print("Restarting robohead_controller...")
-        run_cmd(f"sudo systemctl restart robohead.service")
+        print("Перезапуск robohead_controller...")
+        run_cmd("sudo systemctl restart robohead.service")
 
-def cmd_core_start(args):
-    check_ros_workspace()
-    print("Starting robohead_controller...")
-    run_cmd(f"sudo systemctl start robohead.service")
+def core_start(args):
+    check_ros()
+    print("Запуск robohead_controller...")
+    run_cmd("sudo systemctl start robohead.service")
 
-def cmd_core_stop(args):
-    check_ros_workspace()
-    print("Stopping robohead_controller...")
-    run_cmd(f"sudo systemctl stop robohead.service")
+def core_stop(args):
+    check_ros()
+    print("Остановка robohead_controller...")
+    run_cmd("sudo systemctl stop robohead.service")
 
-def cmd_core_shutdown(args):
+def core_shutdown(args):
     sync = "" if args.no_sync else "-h"
     cmd = f"sudo shutdown {sync} now"
-    print(f"SHUTDOWN: {cmd}")
-    if input("Confirm? (y/n): ").lower() == 'y':
+    print(f"ВЫКЛЮЧЕНИЕ: {cmd}")
+    if input("Подтвердить? (y/n): ").lower() == 'y':
         run_cmd(cmd)
 
-def cmd_core_reboot(args):
-    sync = "" if args.no_sync else ""
-    cmd = f"sudo reboot {sync}"
-    print(f"REBOOT: {cmd}")
-    if input("Confirm? (y/n): ").lower() == 'y':
+def core_reboot(args):
+    cmd = "sudo reboot"
+    print(f"ПЕРЕЗАГРУЗКА: {cmd}")
+    if input("Подтвердить? (y/n): ").lower() == 'y':
         run_cmd(cmd)
 
-def cmd_config_speakers_set_volume(args):
+def set_volume(args):
     volume = None
     
     if args.default:
@@ -90,406 +83,322 @@ def cmd_config_speakers_set_volume(args):
         try:
             volume = int(args.VOLUME)
             if volume < 0 or volume > 100:
-                print("Error: Volume must be between 0 and 100")
+                print("Громкость должна быть от 0 до 100")
                 return
-        except (ValueError, TypeError):
-            print(f"Error: Invalid volume value '{args.VOLUME}'. Must be an integer (0-100)")
+        except:
+            print(f"Неверное значение громкости: {args.VOLUME}")
             return
     else:
-        print("Error: Specify volume or use --default")
+        print("Укажите громкость или используйте --default")
         return
     
     if args.now:
-        print(f"Volume: {volume}% (current session)")
+        print(f"Громкость: {volume}% (текущий сеанс)")
         run_cmd(f"amixer sset Master {volume}%")
     
     if args.standart:
-        yaml_path = YAML_CONFIG
-        if yaml_path.exists():
-            backup_file(yaml_path)
-            with open(yaml_path, 'r', encoding='utf-8') as f:
+        if YAML_CONFIG.exists():
+            backup(YAML_CONFIG)
+            with open(YAML_CONFIG, 'r') as f:
                 content = f.read()
             if "speakers_volume:" in content:
                 content = re.sub(r'speakers_volume:\s*\d+', f'speakers_volume: {volume}', content)
             else:
                 content = content.replace('speakers:', f'speakers:\n  volume: {volume}\n  #')
-            with open(yaml_path, 'w', encoding='utf-8') as f:
+            with open(YAML_CONFIG, 'w') as f:
                 f.write(content)
-            print(f"Volume {volume}% saved for startup")
+            print(f"Громкость {volume}% сохранена для автозапуска")
 
-def cmd_config_voice_set_audio(args):
+def set_audio(args):
     if not args.from_file or not args.to_module:
-        print("Required: --from-file and --to-module")
+        print("Требуются: --from-file и --to-module")
         return
-    module_parts = args.to_module.split('.')
-    if len(module_parts) < 3 or module_parts[0] != 'robohead_controller_actions':
-        print(f"Invalid module format: {args.to_module}")
+    
+    parts = args.to_module.split('.')
+    if len(parts) < 3 or parts[0] != 'robohead_controller_actions':
+        print(f"Неверный формат модуля: {args.to_module}")
         return
-    action_name = module_parts[1]
-    action_dir = ACTIONS_DIR / action_name
+    
+    name = parts[1]
+    action_dir = ACTIONS_DIR / name
+    
     if not action_dir.exists():
-        print(f"Module not found: {action_dir}")
+        print(f"Модуль не найден: {action_dir}")
         return
-    dest_file = action_dir / Path(args.from_file).name
-    shutil.copy2(args.from_file, dest_file)
-    print(f"Audio copied: {args.from_file} -> {dest_file}")
-    if args.to_file:
-        shutil.copy2(args.from_file, args.to_file)
-        print(f"Also copied to: {args.to_file}")
-    if args.json_pack and Path(args.json_pack).exists():
-        with open(args.json_pack, 'r', encoding='utf-8') as f:
-            mapping = json.load(f)
-        mapping[args.to_module] = str(dest_file)
-        with open(args.json_pack, 'w', encoding='utf-8') as f:
-            json.dump(mapping, f, ensure_ascii=False, indent=2)
-        print(f"JSON package updated: {args.json_pack}")
+    
+    dest = action_dir / Path(args.from_file).name
+    shutil.copy2(args.from_file, dest)
+    print(f"Аудио скопировано: {args.from_file} -> {dest}")
 
-def cmd_config_words_rebuild(args):
-    check_ros_workspace()
+def rebuild_dict(args):
+    check_ros()
     if not DICT_FILE.exists():
-        print(f"Dictionary file not found: {DICT_FILE}")
+        print(f"Файл словаря не найден: {DICT_FILE}")
         return
     
     if not DICT2TRANSCRIPT_PATH.exists():
-        print(f"dict2transcript.pl not found: {DICT2TRANSCRIPT_PATH}")
-        print("Install ru4sphinx package")
+        print(f"dict2transcript.pl не найден: {DICT2TRANSCRIPT_PATH}")
         return
     
-    print(f"Rebuilding dictionary...")
-    print(f"  Input:  {DICT_FILE}")
-    print(f"  Output: {DICT_OUTPUT_FILE}")
-    
+    print("Пересборка словаря...")
     cmd = f"{DICT2TRANSCRIPT_PATH} {DICT_FILE} {DICT_OUTPUT_FILE}"
     
     try:
         run_cmd(cmd)
-        print(f"Dictionary rebuilt successfully!")
-        print("Restart robohead_controller to apply changes:")
+        print("Словарь пересобран успешно!")
+        print("Перезапустите robohead_controller для применения:")
         print("  robohead core restart")
     except Exception as e:
-        print(f"Error rebuilding dictionary: {e}")
-        sys.exit(1)
+        print(f"Ошибка: {e}")
 
-def cmd_config_words_set_activation(args):
-    check_ros_workspace()
+def add_word(args):
+    check_ros()
     word = args.WORD.strip().lower()
-    act_volume = args.act_volume if args.act_volume else 40
+    vol = args.act_volume if args.act_volume else 40
+    
     if DICT_FILE.exists():
-        with open(DICT_FILE, 'r', encoding='utf-8') as f:
+        with open(DICT_FILE, 'r') as f:
             words = [line.strip().lower() for line in f if line.strip()]
         if word not in words:
-            with open(DICT_FILE, 'a', encoding='utf-8') as f:
+            with open(DICT_FILE, 'a') as f:
                 f.write(f"{word}\n")
-            print(f"Word '{word}' added to dictionary")
+            print(f"Слово '{word}' добавлено в словарь")
+    
     if GRAM_FILE.exists():
-        backup_file(GRAM_FILE)
-        with open(GRAM_FILE, 'r', encoding='utf-8') as f:
+        backup(GRAM_FILE)
+        with open(GRAM_FILE, 'r') as f:
             content = f.read()
-        if f'= {word}' not in content and f'= <command_{word}' not in content:
+        if f'= {word}' not in content:
             if '<command> =' in content:
-                content = content.replace(
-                    '<command> =', 
-                    f'<command> = <command_{word}> |'
-                )
+                content = content.replace('<command> =', f'<command> = <command_{word}> |')
                 content += f"\n<command_{word}> = {word} ;\n"
-            with open(GRAM_FILE, 'w', encoding='utf-8') as f:
+            with open(GRAM_FILE, 'w') as f:
                 f.write(content)
-            print(f"Command '{word}' added to grammar")
-    print(f"Activation threshold: {act_volume} dB")
-    print("Run: robohead config words --rebuild")
+            print(f"Команда '{word}' добавлена в грамматику")
+    
+    print(f"Порог активации: {vol} дБ")
+    print("Выполните: robohead config words --rebuild")
 
-def cmd_config_words_write_from_file(args):
+def write_dict(args):
     src = Path(args.PATH)
     if not src.exists():
-        print(f"File not found: {src}")
+        print(f"Файл не найден: {src}")
         return
     if DICT_FILE.exists():
-        backup_file(DICT_FILE)
+        backup(DICT_FILE)
     shutil.copy2(src, DICT_FILE)
-    print(f"Dictionary replaced: {src} -> {DICT_FILE}")
-    print("Run: robohead config words --rebuild")
+    print(f"Словарь заменён: {src} -> {DICT_FILE}")
+    print("Выполните: robohead config words --rebuild")
 
-def cmd_action_list(args):
-    check_ros_workspace()
+def list_actions(args):
+    check_ros()
     if not ACTIONS_DIR.exists():
-        print(f"Actions directory not found: {ACTIONS_DIR}")
+        print(f"Директория действий не найдена: {ACTIONS_DIR}")
         return
+    
     actions = [d.name for d in ACTIONS_DIR.iterdir() if d.is_dir() and (d / 'action.py').exists()]
+    
     if not actions:
-        print("Actions list is empty")
+        print("Список действий пуст")
         return
-    print(f"Available actions ({len(actions)}):")
+    
+    print(f"Доступные действия ({len(actions)}):")
     for name in sorted(actions):
-        action_path = ACTIONS_DIR / name / 'action.py'
-        mtime = os.path.getmtime(action_path)
-        date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
-        print(f"   - {name:20} [updated: {date_str}]")
+        path = ACTIONS_DIR / name / 'action.py'
+        date = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%Y-%m-%d')
+        print(f"   - {name:20} [обновлено: {date}]")
 
-def cmd_action_create(args):
-    check_ros_workspace()
+def create_action(args):
+    check_ros()
     name = args.NAME.strip().lower()
     word = args.WORD.strip().lower() if args.WORD and not args.no_word else None
+    
     action_dir = ACTIONS_DIR / name
     if action_dir.exists():
-        print(f"Action '{name}' already exists: {action_dir}")
+        print(f"Действие '{name}' уже существует: {action_dir}")
         return
-    action_dir.mkdir(parents=True, exist_ok=True)
-    template_lines = [
-        '#!/usr/bin/env python3',
-        '# -*- coding: utf-8 -*-',
-        '"""',
-        f'Action: {name}',
-        'Auto-generated by robohead CLI',
-        '"""',
-        'import os',
-        'from robohead_controller_actions.main import *',
-        '',
-        f'def run(robohead_controller: RoboheadController, cmds: str):',
-        '    """',
-        f'    Execute action "{name}".',
-        '    :param robohead_controller: controller instance',
-        '    :param cmds: recognized command string',
-        '    """',
-        "    script_path = os.path.dirname(os.path.abspath(__file__)) + '/'",
-        '    ',
-        f'    print("Action \'{name}\' executed")',
-        ''
-    ]
+    
+    action_dir.mkdir(parents=True)
+    
+    code = "#!/usr/bin/env python3\n"
+    code += f"# Action: {name}\n\n"
+    code += "from robohead_controller_actions.main import *\n\n"
+    code += f"def run(robohead_controller: RoboheadController, cmds: str):\n"
+    code += f"    print(\"Действие {name} выполнено\")\n"
+    
     action_file = action_dir / 'action.py'
-    with open(action_file, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(template_lines))
-    print(f"Action created: {action_file}")
+    with open(action_file, 'w') as f:
+        f.write(code)
+    print(f"Действие создано: {action_file}")
+    
     if word:
-        print(f"Adding word '{word}' to recognition system...")
+        print(f"Добавление слова '{word}' в систему распознавания...")
         class FakeArgs:
             WORD = word
             act_volume = 40
-        cmd_config_words_set_activation(FakeArgs())
-        if args.update_dictionary and YAML_CONFIG.exists():
-            backup_file(YAML_CONFIG)
-            with open(YAML_CONFIG, 'r', encoding='utf-8') as f:
-                content = f.read()
-            mapping_line = f'  "{word}": "robohead_controller_actions.{name}.action",'
-            if 'robohead_controller_actions_match:' in content:
-                if '}' in content:
-                    content = content.replace('}', f'{mapping_line}\n}}')
-                else:
-                    content += f'\n{mapping_line}'
-                with open(YAML_CONFIG, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                print(f"Mapping added to {YAML_CONFIG.name}")
-    if args.set_std:
-        print("Action marked as standard")
-    print(f"\nNext steps:")
-    print(f"   1. Edit {action_file}")
-    print(f"   2. Run: robohead config words --rebuild")
-    print(f"   3. Restart: robohead core restart")
+        add_word(FakeArgs())
+    
+    print(f"\nСледующие шаги:")
+    print(f"   1. Отредактируйте {action_file}")
+    print(f"   2. Выполните: robohead config words --rebuild")
+    print(f"   3. Перезапустите: robohead core restart")
 
-def cmd_action_remove(args):
-    check_ros_workspace()
+def remove_action(args):
+    check_ros()
     name = args.PACKAGE.strip().lower()
     action_dir = ACTIONS_DIR / name
+    
     if not action_dir.exists():
-        action_dir = ACTIONS_DIR / (name + '.py')
-        if action_dir.exists():
-            action_dir = action_dir.parent
-    if not action_dir.exists():
-        print(f"Action not found: {name}")
+        print(f"Действие не найдено: {name}")
         return
-    if input(f"Delete '{name}'? (y/n): ").lower() != 'y':
-        print("Cancelled")
+    
+    if input(f"Удалить '{name}'? (y/n): ").lower() != 'y':
+        print("Отменено")
         return
+    
     shutil.rmtree(action_dir)
-    print(f"Deleted: {action_dir}")
-    if not args.dont_change_dictionary:
-        print("Updating grammar and dictionary...")
-        for filepath in [GRAM_FILE, DICT_FILE]:
-            if filepath.exists():
-                backup_file(filepath)
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                filtered = [l for l in lines if name.lower() not in l.lower()]
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.writelines(filtered)
-                print(f"Cleaned: {filepath.name}")
-        if YAML_CONFIG.exists():
-            with open(YAML_CONFIG, 'r', encoding='utf-8') as f:
-                content = f.read()
-            content = re.sub(rf'\s*"[^"]*{name}[^"]*":\s*"[^"]*{name}[^"]*\.action",?\n', '', content)
-            with open(YAML_CONFIG, 'w', encoding='utf-8') as f:
-                f.write(content)
-            print(f"Updated: {YAML_CONFIG.name}")
-        print("Run: robohead config words --rebuild")
+    print(f"Удалено: {action_dir}")
 
-def cmd_action_info(args):
-    check_ros_workspace()
+def action_info(args):
+    check_ros()
     name = args.PACKAGE.strip().lower()
-    action_dir = ACTIONS_DIR / name
-    action_file = action_dir / 'action.py'
+    action_file = ACTIONS_DIR / name / 'action.py'
+    
     if not action_file.exists():
-        print(f"Action not found: {name}")
+        print(f"Действие не найдено: {name}")
         return
+    
     if args.path:
         print(str(action_file.absolute()))
     elif args.data:
         mtime = os.path.getmtime(action_file)
         print(datetime.fromtimestamp(mtime).isoformat())
-    elif args.ls:
-        with open(action_file, 'r', encoding='utf-8') as f:
+    elif args.in_file:
+        with open(action_file, 'r') as f:
             print(f.read())
     else:
-        print(f"Action: {name}")
-        print(f"Path: {action_file.absolute()}")
-        print(f"Updated: {datetime.fromtimestamp(os.path.getmtime(action_file)).isoformat()}")
-        print(f"Size: {os.path.getsize(action_file)} bytes")
-        print(f"\nContent:")
-        print("-" * 40)
-        with open(action_file, 'r', encoding='utf-8') as f:
-            print(f.read())
+        print(f"Действие: {name}")
+        print(f"Путь: {action_file.absolute()}")
+        print(f"Обновлено: {datetime.fromtimestamp(os.path.getmtime(action_file)).isoformat()}")
+        print(f"Размер: {os.path.getsize(action_file)} байт")
 
-class IntType:
-    def __init__(self, min_val=None, max_val=None):
-        self.min_val = min_val
-        self.max_val = max_val
-    
-    def __call__(self, value):
-        try:
-            ivalue = int(value)
-        except (ValueError, TypeError):
-            raise argparse.ArgumentTypeError(f"Invalid integer value: '{value}'")
-        
-        if self.min_val is not None and ivalue < self.min_val:
-            raise argparse.ArgumentTypeError(f"Value must be >= {self.min_val}, got {ivalue}")
-        if self.max_val is not None and ivalue > self.max_val:
-            raise argparse.ArgumentTypeError(f"Value must be <= {self.max_val}, got {ivalue}")
-        
+def check_int(value, min_val=0, max_val=100):
+    try:
+        ivalue = int(value)
+        if ivalue < min_val or ivalue > max_val:
+            raise argparse.ArgumentTypeError(f"Должно быть от {min_val} до {max_val}")
         return ivalue
+    except:
+        raise argparse.ArgumentTypeError(f"Неверное значение: {value}")
 
 def main():
     parser = argparse.ArgumentParser(
         prog='robohead',
-        description='RoboHead CLI - ROS robot control utility',
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description='RoboHead CLI - утилита управления роботом на базе ROS',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Примеры:
+  robohead core restart --debug
+  robohead config speakers set_volume 75 --now
+  robohead config words set_activation_word привет --act_volume 35
+  robohead action create smile --update-dictionary
+  robohead action list
+
+Автор: https://github.com/ch1brikess
+        '''
     )
-    subparsers = parser.add_subparsers(dest='module', metavar='MODULE', help='Available modules')
+    subparsers = parser.add_subparsers(dest='module', metavar='МОДУЛЬ', help='Доступные модули')
 
-    # ===== CORE =====
-    p_core = subparsers.add_parser('core', help='System and service control')
-    core_sub = p_core.add_subparsers(dest='command', metavar='COMMAND', help='Core commands')
+    # CORE
+    p_core = subparsers.add_parser('core', help='Управление системой и сервисами')
+    core_sub = p_core.add_subparsers(dest='command', metavar='КОМАНДА', help='Команды core')
+    
+    p_start = core_sub.add_parser('start', help='Запустить сервис robohead_controller')
+    p_start.set_defaults(func=core_start)
+    
+    p_stop = core_sub.add_parser('stop', help='Остановить сервис robohead_controller')
+    p_stop.set_defaults(func=core_stop)
+    
+    p_restart = core_sub.add_parser('restart', help='Перезапустить сервис robohead_controller')
+    p_restart.add_argument('--debug', action='store_true', help='Запуск в режиме отладки через roslaunch')
+    p_restart.set_defaults(func=core_restart)
+    
+    p_shutdown = core_sub.add_parser('shutdown', help='Выключить систему')
+    p_shutdown.add_argument('--no-sync', action='store_true', help='Выключение без синхронизации дисков')
+    p_shutdown.set_defaults(func=core_shutdown)
+    
+    p_reboot = core_sub.add_parser('reboot', help='Перезагрузить систему')
+    p_reboot.add_argument('--no-sync', action='store_true', help='Перезагрузка без синхронизации дисков')
+    p_reboot.set_defaults(func=core_reboot)
 
-    p_start = core_sub.add_parser('start', help='Start robohead_controller service')
-    p_start.set_defaults(func=cmd_core_start)
+    # CONFIG
+    p_config = subparsers.add_parser('config', help='Настройки системы')
+    config_sub = p_config.add_subparsers(dest='command', metavar='КОМАНДА', help='Команды config')
+    
+    # Speakers
+    p_speakers = config_sub.add_parser('speakers', help='Настройки аудио и динамиков')
+    sp_sub = p_speakers.add_subparsers(dest='sp_command', metavar='КОМАНДА', help='Команды для динамиков')
+    
+    p_vol = sp_sub.add_parser('set_volume', help='Установить уровень громкости')
+    p_vol.add_argument('VOLUME', nargs='?', type=lambda x: check_int(x, 0, 100), help='Уровень громкости (0-100)')
+    p_vol.add_argument('--default', action='store_true', help='Установить стандартную громкость (50%%)')
+    p_vol.add_argument('--now', action='store_true', help='Применить сейчас (текущий сеанс)')
+    p_vol.add_argument('--standart', action='store_true', help='Сохранить для автозапуска')
+    p_vol.set_defaults(func=set_volume)
 
-    p_stop = core_sub.add_parser('stop', help='Stop robohead_controller service')
-    p_stop.set_defaults(func=cmd_core_stop)
+    # Voice
+    p_voice = config_sub.add_parser('voice', help='Настройки голосового распознавания')
+    voice_sub = p_voice.add_subparsers(dest='voice_command', metavar='КОМАНДА', help='Голосовые команды')
+    
+    p_audio = voice_sub.add_parser('set_audio_to_module', help='Заменить аудиофайл в модуле')
+    p_audio.add_argument('--from-file', required=True, help='Путь к исходному аудиофайлу (mp3/wav)')
+    p_audio.add_argument('--to-module', required=True, help='Целевой модуль')
+    p_audio.add_argument('--to-file', help='Абсолютный путь назначения')
+    p_audio.add_argument('--json-pack', help='JSON-файл с маппингом путей')
+    p_audio.set_defaults(func=set_audio)
 
-    p_restart = core_sub.add_parser('restart', help='Restart robohead_controller service')
-    p_restart.add_argument('--debug', action='store_true', 
-                          help='Start in debug mode via roslaunch')
-    p_restart.set_defaults(func=cmd_core_restart)
+    # Words
+    p_words = config_sub.add_parser('words', help='Словарь голосового распознавания')
+    p_words.add_argument('--rebuild', action='store_true', help='Пересобрать фонетический словарь')
+    p_words.set_defaults(func=lambda a: rebuild_dict(a) if a.rebuild else p_words.print_help())
+    
+    words_sub = p_words.add_subparsers(dest='words_command', metavar='КОМАНДА', help='Команды для словаря')
+    
+    p_act = words_sub.add_parser('set_activation_word', help='Добавить активационное слово')
+    p_act.add_argument('WORD', help='Слово для добавления')
+    p_act.add_argument('--act_volume', type=int, choices=[35, 40, 45], help='Порог активации в дБ')
+    p_act.set_defaults(func=add_word)
+    
+    p_write = words_sub.add_parser('write_from_file', help='Заменить словарь из файла')
+    p_write.add_argument('PATH', help='Путь к файлу со списком слов')
+    p_write.set_defaults(func=write_dict)
 
-    p_shutdown = core_sub.add_parser('shutdown', help='Shutdown the system')
-    p_shutdown.add_argument('--no-sync', action='store_true', 
-                           help='Shutdown without disk synchronization')
-    p_shutdown.set_defaults(func=cmd_core_shutdown)
-
-    p_reboot = core_sub.add_parser('reboot', help='Reboot the system')
-    p_reboot.add_argument('--no-sync', action='store_true', 
-                         help='Reboot without disk synchronization')
-    p_reboot.set_defaults(func=cmd_core_reboot)
-
-    # ===== CONFIG =====
-    p_config = subparsers.add_parser('config', help='System configuration settings')
-    config_sub = p_config.add_subparsers(dest='command', metavar='COMMAND', help='Config commands')
-
-    # Config -> Speakers
-    p_speakers = config_sub.add_parser('speakers', help='Audio and speakers settings')
-    sp_sub = p_speakers.add_subparsers(dest='sp_command', metavar='SPEAKER_COMMAND', help='Speaker commands')
-
-    p_vol = sp_sub.add_parser('set_volume', help='Set speakers volume level')
-    p_vol.add_argument('VOLUME', nargs='?', type=IntType(0, 100), 
-                      help='Volume level (0-100)')
-    # ИСПРАВЛЕНО: %% вместо % в help строках
-    p_vol.add_argument('--default', action='store_true', 
-                      help='Set default volume (50%%)')
-    p_vol.add_argument('--now', action='store_true', 
-                      help='Apply volume immediately for current session')
-    p_vol.add_argument('--standart', action='store_true', 
-                      help='Save volume for auto-startup')
-    p_vol.set_defaults(func=cmd_config_speakers_set_volume)
-
-    # Config -> Voice
-    p_voice = config_sub.add_parser('voice', help='Voice recognition and audio settings')
-    voice_sub = p_voice.add_subparsers(dest='voice_command', metavar='VOICE_COMMAND', help='Voice commands')
-
-    p_audio = voice_sub.add_parser('set_audio_to_module', help='Replace audio file in action module')
-    p_audio.add_argument('--from-file', required=True, 
-                        help='Path to source audio file (mp3/wav)')
-    p_audio.add_argument('--to-module', required=True, 
-                        help='Target module (e.g., robohead_controller_actions.smile.action)')
-    p_audio.add_argument('--to-file', 
-                        help='Absolute destination path (if not standard module)')
-    p_audio.add_argument('--json-pack', 
-                        help='Path to JSON file with path mappings')
-    p_audio.set_defaults(func=cmd_config_voice_set_audio)
-
-    # Config -> Words
-    p_words = config_sub.add_parser('words', help='Voice recognition dictionary management')
-    p_words.add_argument('--rebuild', action='store_true', 
-                        help='Rebuild phonetic dictionary from dictionary.txt')
-    p_words.set_defaults(func=lambda a: cmd_config_words_rebuild(a) if a.rebuild else p_words.print_help())
-
-    words_sub = p_words.add_subparsers(dest='words_command', metavar='WORDS_COMMAND', help='Dictionary commands')
-
-    p_act_word = words_sub.add_parser('set_activation_word', help='Add activation word to dictionary')
-    p_act_word.add_argument('WORD', 
-                           help='Word to add for recognition')
-    p_act_word.add_argument('--act_volume', type=int, choices=[35, 40, 45], 
-                           help='Activation threshold in dB (35/40/45)')
-    p_act_word.set_defaults(func=cmd_config_words_set_activation)
-
-    p_write = words_sub.add_parser('write_from_file', help='Replace dictionary from external file')
-    p_write.add_argument('PATH', 
-                        help='Path to file with word list')
-    p_write.set_defaults(func=cmd_config_words_write_from_file)
-
-    # ===== ACTION =====
-    p_action = subparsers.add_parser('action', help='Action management and creation')
-    action_sub = p_action.add_subparsers(dest='command', metavar='COMMAND', help='Action commands')
-
-    p_list = action_sub.add_parser('list', help='List all available actions')
-    p_list.set_defaults(func=cmd_action_list)
-
-    p_create = action_sub.add_parser('create', help='Create new action')
-    p_create.add_argument('NAME', 
-                         help='Action name (creates folder)')
-    p_create.add_argument('WORD', nargs='?', 
-                         help='Activation word (optional)')
-    p_create.add_argument('--set-std', action='store_true', 
-                         help='Mark as standard action')
-    p_create.add_argument('--update-dictionary', action='store_true', 
-                         help='Auto-add to dictionary and YAML config')
-    p_create.add_argument('--no-word', action='store_true', 
-                         help='Do not add activation word')
-    p_create.set_defaults(func=cmd_action_create)
-
-    p_remove = action_sub.add_parser('remove', help='Remove existing action')
-    p_remove.add_argument('PACKAGE', 
-                         help='Action/package name to remove')
-    p_remove.add_argument('--dont-change-dictionary', action='store_true', 
-                         help='Keep word in grammar and dictionary')
-    p_remove.set_defaults(func=cmd_action_remove)
-
-    p_info = action_sub.add_parser('info', help='Get information about action')
-    p_info.add_argument('PACKAGE', 
-                       help='Action name')
-    p_info.add_argument('--path', action='store_true', 
-                       help='Show only file path')
-    p_info.add_argument('--data', action='store_true', 
-                       help='Show only modification date')
-    p_info.add_argument('--ls', action='store_true', 
-                       help='Show only action.py content')
-    p_info.set_defaults(func=cmd_action_info)
+    # ACTION
+    p_action = subparsers.add_parser('action', help='Управление действиями')
+    action_sub = p_action.add_subparsers(dest='command', metavar='КОМАНДА', help='Команды для действий')
+    
+    p_list = action_sub.add_parser('list', help='Список доступных действий')
+    p_list.set_defaults(func=list_actions)
+    
+    p_create = action_sub.add_parser('create', help='Создать новое действие')
+    p_create.add_argument('NAME', help='Имя действия (папка)')
+    p_create.add_argument('WORD', nargs='?', help='Активационное слово (опционально)')
+    p_create.add_argument('--set-std', action='store_true', help='Пометить как стандартное')
+    p_create.add_argument('--update-dictionary', action='store_true', help='Автодобавление в словарь')
+    p_create.add_argument('--no-word', action='store_true', help='Без активационного слова')
+    p_create.set_defaults(func=create_action)
+    
+    p_remove = action_sub.add_parser('remove', help='Удалить действие')
+    p_remove.add_argument('PACKAGE', help='Имя действия/пакета')
+    p_remove.add_argument('--dont-change-dictionary', action='store_true', help='Не удалять из словаря')
+    p_remove.set_defaults(func=remove_action)
+    
+    p_info = action_sub.add_parser('info', help='Информация о действии')
+    p_info.add_argument('PACKAGE', help='Имя действия')
+    p_info.add_argument('--path', action='store_true', help='Показать только путь')
+    p_info.add_argument('--data', action='store_true', help='Показать только дату')
+    p_info.add_argument('--in-file', action='store_true', help='Показать содержимое файла')
+    p_info.set_defaults(func=action_info)
 
     args = parser.parse_args()
     
@@ -497,13 +406,10 @@ def main():
         try:
             args.func(args)
         except KeyboardInterrupt:
-            print("\nInterrupted by user")
+            print("\nПрервано пользователем")
             sys.exit(130)
         except Exception as e:
-            print(f"Error: {e}")
-            if os.environ.get('DEBUG'):
-                import traceback
-                traceback.print_exc()
+            print(f"Ошибка: {e}")
             sys.exit(1)
     else:
         parser.print_help()
