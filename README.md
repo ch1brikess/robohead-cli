@@ -1,18 +1,18 @@
-
 # RoboHead CLI
 
-Командная строка утилита для управления роботом RoboHead на базе ROS (Robot Operating System).
+Командная утилита для управления роботом RoboHead на базе ROS (Robot Operating System).
 
-## 📋 Описание
+## Описание
 
 RoboHead CLI предоставляет удобный интерфейс для:
+
 - Управления системными сервисами робота (старт, стоп, рестарт)
 - Настройки аудио и громкости
 - Управления словарём голосового распознавания
 - Создания и управления действиями (actions) робота
 - Выключения и перезагрузки системы
 
-## 📁 Структура проекта
+## Структура проекта
 
 ```
 robohead-cli/
@@ -21,48 +21,35 @@ robohead-cli/
 └── install.sh            # Скрипт автоматической установки
 ```
 
-## 🚀 Установка
+## Установка
 
 ### Автоматическая установка
 
 ```bash
-# Клонируйте репозиторий
-git clone https://github.com/ch1brikess/robohead-cli.git
-
-# Перейдите в директорию проекта
 cd robohead-cli
-
-# Запустите скрипт установки
 sudo ./install.sh
 ```
 
 ### Ручная установка
 
 ```bash
-# 1. Создайте директорию
 sudo mkdir -p /opt/robohead-cli
-
-# 2. Скопируйте файл
 sudo cp source/robohead /opt/robohead-cli/robohead
-
-# 3. Сделайте исполняемым
 sudo chmod +x /opt/robohead-cli/robohead
-
-# 4. Создайте символическую ссылку
 sudo ln -s /opt/robohead-cli/robohead /usr/local/bin/robohead
 ```
 
-## 📖 Использование
+## Использование
 
 После установки команда `robohead` доступна из любой директории:
 
 ```bash
-robohead [module] [command] [options]
+robohead [модуль] [команда] [опции]
 ```
 
 ### Основные модули
 
-#### **core** — Управление системой и сервисами
+#### core — Управление системой и сервисами
 
 ```bash
 # Запуск сервиса
@@ -79,16 +66,17 @@ robohead core restart --debug
 
 # Выключение системы
 robohead core shutdown
-robohead core shutdown --no-sync    # Без синхронизации дисков
+robohead core shutdown --no-sync
 
 # Перезагрузка системы
 robohead core reboot
-robohead core reboot --no-sync      # Без синхронизации дисков
+robohead core reboot --no-sync
 ```
 
-#### **config** — Настройки системы
+#### config — Настройки системы
 
 **Динамики и аудио:**
+
 ```bash
 # Установить громкость (0-100)
 robohead config speakers set_volume 75
@@ -104,6 +92,7 @@ robohead config speakers set_volume 60 --standart
 ```
 
 **Голосовое распознавание:**
+
 ```bash
 # Добавить активационное слово
 robohead config words set_activation_word привет
@@ -117,6 +106,7 @@ robohead config words write_from_file /path/to/dictionary.txt
 ```
 
 **Аудио файлы:**
+
 ```bash
 # Заменить аудио файл в модуле
 robohead config voice set_audio_to_module \
@@ -124,7 +114,7 @@ robohead config voice set_audio_to_module \
   --to-module robohead_controller_actions.greeting.action
 ```
 
-#### **action** — Управление действиями
+#### action — Управление действиями
 
 ```bash
 # Список всех действий
@@ -139,16 +129,16 @@ robohead action create custom_action --no-word
 
 # Получить информацию о действии
 robohead action info smile
-robohead action info smile --path      # Только путь
-robohead action info smile --data      # Только дата
-robohead action info smile --ls        # Только содержимое
+robohead action info smile --path
+robohead action info smile --data
+robohead action info smile --in-file
 
 # Удалить действие
 robohead action remove smile
 robohead action remove smile --dont-change-dictionary
 ```
 
-## 📚 Примеры использования
+## Примеры использования
 
 ### Создание нового действия
 
@@ -164,8 +154,6 @@ robohead config words --rebuild
 
 # 4. Перезапустите сервис
 robohead core restart
-
-# 5. Скажите "привет" роботу
 ```
 
 ### Настройка громкости
@@ -182,9 +170,13 @@ robohead config speakers set_volume 75 --now --standart
 robohead core restart --debug
 ```
 
-## 🔧 Требования
+## Справка
 
-- **Python 3.6+**
-- **ROS** (Noetic/Melodic)
-- **RoboHead workspace** (`~/robohead_ws`)
-- **Права sudo** для системных команд
+Для получения помощи по конкретной команде используйте флаг `-h` или `--help`:
+
+```bash
+robohead --help
+robohead core --help
+robohead config speakers set_volume --help
+robohead action create --help
+```
