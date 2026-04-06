@@ -20,7 +20,10 @@ ACTIONS_DIR = CONTROLLER_ROOT / "scripts" / "robohead_controller_actions"
 
 GRAM_FILE = VOICE_CONFIG_DIR / "gram.txt"
 DICT_FILE = VOICE_CONFIG_DIR / "dictionary.txt"
+DICT_OUTPUT_FILE = VOICE_CONFIG_DIR / "dictionary.dict"
 YAML_CONFIG = CONFIG_DIR / "robohead_controller.yaml"
+
+DICT2TRANSCRIPT_PATH = WS_ROOT / "src" / "ru4sphinx" / "text2dict" / "dict2transcript.pl"
 
 def check_ros_workspace():
     if not WS_ROOT.exists():
@@ -79,14 +82,27 @@ def cmd_core_reboot(args):
         run_cmd(cmd)
 
 def cmd_config_speakers_set_volume(args):
-    volume = args.VOLUME if args.VOLUME else (50 if args.default else None)
-    if volume is None:
-        print("Specify volume or use --default")
+    volume = None
+    
+    if args.default:
+        volume = 50
+    elif args.VOLUME is not None:
+        try:
+            volume = int(args.VOLUME)
+            if volume < 0 or volume > 100:
+                print("Error: Volume must be between 0 and 100")
+                return
+        except (ValueError, TypeError):
+            print(f"Error: Invalid volume value '{args.VOLUME}'. Must be an integer (0-100)")
+            return
+    else:
+        print("Error: Specify volume or use --default")
         return
-    volume = max(0, min(100, volume))
+    
     if args.now:
         print(f"Volume: {volume}% (current session)")
         run_cmd(f"amixer sset Master {volume}%")
+    
     if args.standart:
         yaml_path = YAML_CONFIG
         if yaml_path.exists():
@@ -133,15 +149,26 @@ def cmd_config_words_rebuild(args):
     if not DICT_FILE.exists():
         print(f"Dictionary file not found: {DICT_FILE}")
         return
-    print(f"Rebuilding dictionary from {DICT_FILE}...")
-    dict_output = VOICE_CONFIG_DIR / "dictionary.dict"
-    cmd = f"dict2transcript.pl {DICT_FILE} > {dict_output}"
+    
+    if not DICT2TRANSCRIPT_PATH.exists():
+        print(f"dict2transcript.pl not found: {DICT2TRANSCRIPT_PATH}")
+        print("Install ru4sphinx package")
+        return
+    
+    print(f"Rebuilding dictionary...")
+    print(f"  Input:  {DICT_FILE}")
+    print(f"  Output: {DICT_OUTPUT_FILE}")
+    
+    cmd = f"{DICT2TRANSCRIPT_PATH} {DICT_FILE} {DICT_OUTPUT_FILE}"
+    
     try:
         run_cmd(cmd)
-        print(f"Dictionary rebuilt: {dict_output}")
-        print("Restart robohead_controller to apply!")
-    except:
-        print("dict2transcript.pl not found. Install ru4sphinx")
+        print(f"Dictionary rebuilt successfully!")
+        print("Restart robohead_controller to apply changes:")
+        print("  robohead core restart")
+    except Exception as e:
+        print(f"Error rebuilding dictionary: {e}")
+        sys.exit(1)
 
 def cmd_config_words_set_activation(args):
     check_ros_workspace()
@@ -320,6 +347,24 @@ def cmd_action_info(args):
         with open(action_file, 'r', encoding='utf-8') as f:
             print(f.read())
 
+class IntType:
+    def __init__(self, min_val=None, max_val=None):
+        self.min_val = min_val
+        self.max_val = max_val
+    
+    def __call__(self, value):
+        try:
+            ivalue = int(value)
+        except (ValueError, TypeError):
+            raise argparse.ArgumentTypeError(f"Invalid integer value: '{value}'")
+        
+        if self.min_val is not None and ivalue < self.min_val:
+            raise argparse.ArgumentTypeError(f"Value must be >= {self.min_val}, got {ivalue}")
+        if self.max_val is not None and ivalue > self.max_val:
+            raise argparse.ArgumentTypeError(f"Value must be <= {self.max_val}, got {ivalue}")
+        
+        return ivalue
+
 def main():
     parser = argparse.ArgumentParser(
         prog='robohead',
@@ -362,10 +407,11 @@ def main():
     sp_sub = p_speakers.add_subparsers(dest='sp_command', metavar='SPEAKER_COMMAND', help='Speaker commands')
 
     p_vol = sp_sub.add_parser('set_volume', help='Set speakers volume level')
-    p_vol.add_argument('VOLUME', nargs='?', type=int, 
+    p_vol.add_argument('VOLUME', nargs='?', type=IntType(0, 100), 
                       help='Volume level (0-100)')
+    # ИСПРАВЛЕНО: %% вместо % в help строках
     p_vol.add_argument('--default', action='store_true', 
-                      help='Set default volume (50%)')
+                      help='Set default volume (50%%)')
     p_vol.add_argument('--now', action='store_true', 
                       help='Apply volume immediately for current session')
     p_vol.add_argument('--standart', action='store_true', 
