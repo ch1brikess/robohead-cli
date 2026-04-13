@@ -67,40 +67,85 @@ def core_get_img(args):
         output = run_cmd_capture("lsblk -d -o NAME,SIZE,TYPE | grep disk")
         print("Доступные диски:")
         print(output)
-        device = input("Введите имя диска (например, sdc) или нажмите Enter для /dev/sdc: ").strip()
+        device = input("Введите имя диска (например, mmcblk0 или sdc): ").strip()
         if not device:
-            device = "sdc"
+            device = "mmcblk0"
         if not device.startswith("/dev/"):
             device = f"/dev/{device}"
     
     print(f"Используемое устройство: {device}")
     
-    # Проверка устройства
+    # Проверка существования устройства
     if not os.path.exists(device):
         print(f"Ошибка: Устройство {device} не найдено")
+        print("Проверьте подключение SD-карты и выполните: lsblk")
         return
     
-    # Создание директории
-    IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Директория: {IMAGE_DIR}")
+    # Проверка: не примонтирована ли карта
+    mount_output = run_cmd_capture(f"mount | grep {device}")
+    if mount_output and mount_output.strip():
+        print(f"Внимание: Устройство {device} примонтировано!")
+        print("Размонтируйте перед созданием образа:")
+        print(f"  sudo umount {device}*")
+        if input("Размонтировать автоматически? (y/n): ").lower() == 'y':
+            run_cmd(f"sudo umount {device}*")
+            print("Размонтировано")
+        else:
+            print("Отменено пользователем")
+            return
     
-    # Имя выходного файла
+    # Определение выходного пути
     if args.output:
-        output_name = args.output
-        if not output_name.endswith(".img"):
-            output_name += ".img"
+        output_path = Path(args.output)
+        # Если не указано расширение .img, добавить
+        if output_path.suffix != '.img' and not args.pack2:
+            output_path = output_path.with_suffix(output_path.suffix + '.img')
+        elif args.pack2 and output_path.suffix != '.gz':
+            if output_path.suffix == '.img':
+                output_path = Path(str(output_path) + '.gz')
+            else:
+                output_path = Path(str(output_path) + '.img.gz')
     else:
+        # Путь по умолчанию: ~/OS_image/
+        IMAGE_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_name = f"robohead_image_{timestamp}.img"
+        output_path = IMAGE_DIR / f"robohead_image_{timestamp}.img"
     
-    output_path = IMAGE_DIR / output_name
+    # Создание родительской директории
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Директория: {output_path.parent}")
     print(f"Выходной файл: {output_path}")
+    
+    # Проверка свободного места на целевом разделе
+    print("\nПроверка свободного места...")
+    try:
+        free_space = run_cmd_capture(f"df -BG '{output_path.parent}' | tail -1 | awk '{{print $4}}' | sed 's/G//'")
+        free_gb = int(free_space.strip())
+        print(f"Свободно на разделе: {free_gb} ГБ")
+    except:
+        free_gb = 0
+        print("Не удалось определить свободное место")
     
     # Шаг 1: Создание сырого образа (dd)
     print("\n[1/3] Создание сырого образа...")
-    dd_cmd = f"sudo dd bs=4M status=progress if={device} of={output_path}"
+    print("Это может занять несколько минут...")
+    dd_cmd = f"sudo dd bs=4M status=progress if={device} of='{output_path}'"
+    
     try:
-        run_cmd(dd_cmd)
+        result = subprocess.run(dd_cmd, shell=True, cwd=HOME, executable='/bin/bash')
+        if result.returncode != 0:
+            print(f"\nОшибка dd: код возврата {result.returncode}")
+            print("\nВозможные причины:")
+            print("  1. SD-карта примонтирована — выполните: sudo umount /dev/mmcblk0*")
+            print("  2. Недостаточно места — проверьте: df -h")
+            print("  3. Неверный путь к устройству — проверьте: lsblk")
+            print("  4. Карта повреждена или извлечена")
+            
+            # Очистить частичный файл
+            if output_path.exists():
+                os.remove(output_path)
+                print(f"Удалён частичный файл: {output_path}")
+            return
         print(f"Образ создан: {output_path}")
         print(f"Размер: {os.path.getsize(output_path) / (1024**3):.2f} ГБ")
     except Exception as e:
@@ -112,7 +157,7 @@ def core_get_img(args):
         print("\n[2/3] Сжатие образа через PiShrink...")
         check_pishrink()
         try:
-            run_cmd(f"sudo {PISHRINK_PATH} {output_path}")
+            run_cmd(f"sudo {PISHRINK_PATH} '{output_path}'")
             print(f"Образ сжат: {output_path}")
             print(f"Новый размер: {os.path.getsize(output_path) / (1024**3):.2f} ГБ")
         except Exception as e:
@@ -123,8 +168,8 @@ def core_get_img(args):
     if args.pack2:
         print("\n[3/3] Архивация в gzip...")
         try:
-            run_cmd(f"gzip {output_path}")
-            gzip_path = f"{output_path}.gz"
+            run_cmd(f"gzip '{output_path}'")
+            gzip_path = Path(f"{output_path}.gz")
             print(f"Архив создан: {gzip_path}")
             print(f"Итоговый размер: {os.path.getsize(gzip_path) / (1024**3):.2f} ГБ")
         except Exception as e:
@@ -132,7 +177,7 @@ def core_get_img(args):
             return
     
     print("\nГотово!")
-    print(f"Файл сохранён в: {IMAGE_DIR}")
+    print(f"Файл сохранён в: {output_path.parent}")
 
 def core_restart(args):
     check_ros()
