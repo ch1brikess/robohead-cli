@@ -397,7 +397,7 @@ def action_info(args):
     
     if args.path:
         print(str(action_file.absolute()))
-    elif args.
+    elif args.data:
         mtime = os.path.getmtime(action_file)
         print(datetime.fromtimestamp(mtime).isoformat())
     elif args.in_file:
