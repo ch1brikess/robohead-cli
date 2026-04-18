@@ -7,6 +7,7 @@ import os
 import json
 import re
 import shutil
+import yaml
 from pathlib import Path
 from datetime import datetime
 
@@ -59,7 +60,6 @@ def check_pishrink():
         print("PiShrink установлен")
 
 def core_get_img(args):
-    # Определение устройства
     device = args.device if args.device else None
     
     if not device:
@@ -75,13 +75,10 @@ def core_get_img(args):
     
     print(f"Используемое устройство: {device}")
     
-    # Проверка существования устройства
     if not os.path.exists(device):
         print(f"Ошибка: Устройство {device} не найдено")
-        print("Проверьте подключение SD-карты и выполните: lsblk")
         return
     
-    # Проверка: не примонтирована ли карта
     mount_output = run_cmd_capture(f"mount | grep {device}")
     if mount_output and mount_output.strip():
         print(f"Внимание: Устройство {device} примонтировано!")
@@ -94,10 +91,8 @@ def core_get_img(args):
             print("Отменено пользователем")
             return
     
-    # Определение выходного пути
     if args.output:
         output_path = Path(args.output)
-        # Если не указано расширение .img, добавить
         if output_path.suffix != '.img' and not args.pack2:
             output_path = output_path.with_suffix(output_path.suffix + '.img')
         elif args.pack2 and output_path.suffix != '.gz':
@@ -106,17 +101,14 @@ def core_get_img(args):
             else:
                 output_path = Path(str(output_path) + '.img.gz')
     else:
-        # Путь по умолчанию: ~/OS_image/
         IMAGE_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = IMAGE_DIR / f"robohead_image_{timestamp}.img"
     
-    # Создание родительской директории
     output_path.parent.mkdir(parents=True, exist_ok=True)
     print(f"Директория: {output_path.parent}")
     print(f"Выходной файл: {output_path}")
     
-    # Проверка свободного места на целевом разделе
     print("\nПроверка свободного места...")
     try:
         free_space = run_cmd_capture(f"df -BG '{output_path.parent}' | tail -1 | awk '{{print $4}}' | sed 's/G//'")
@@ -126,7 +118,6 @@ def core_get_img(args):
         free_gb = 0
         print("Не удалось определить свободное место")
     
-    # Шаг 1: Создание сырого образа (dd)
     print("\n[1/3] Создание сырого образа...")
     print("Это может занять несколько минут...")
     dd_cmd = f"sudo dd bs=4M status=progress if={device} of='{output_path}'"
@@ -140,8 +131,6 @@ def core_get_img(args):
             print("  2. Недостаточно места — проверьте: df -h")
             print("  3. Неверный путь к устройству — проверьте: lsblk")
             print("  4. Карта повреждена или извлечена")
-            
-            # Очистить частичный файл
             if output_path.exists():
                 os.remove(output_path)
                 print(f"Удалён частичный файл: {output_path}")
@@ -152,7 +141,6 @@ def core_get_img(args):
         print(f"Ошибка при создании образа: {e}")
         return
     
-    # Шаг 2: Сжатие через PiShrink (если --pack или --2pack)
     if args.pack or args.pack2:
         print("\n[2/3] Сжатие образа через PiShrink...")
         check_pishrink()
@@ -164,7 +152,6 @@ def core_get_img(args):
             print(f"Ошибка при сжатии: {e}")
             return
     
-    # Шаг 3: Архивация в gzip (если --2pack)
     if args.pack2:
         print("\n[3/3] Архивация в gzip...")
         try:
@@ -231,10 +218,11 @@ def set_volume(args):
         print("Укажите громкость или используйте --default")
         return
     
-    if args.now:
-        print(f"Громкость: {volume}% (текущий сеанс)")
-        run_cmd(f"amixer sset Master {volume}%")
+    # Всегда устанавливаем громкость сразу (как будто --now)
+    print(f"Громкость: {volume}% (текущий сеанс)")
+    run_cmd(f"amixer sset Master {volume}%")
     
+    # Если указан --standart, ещё и сохраняем для автозапуска
     if args.standart:
         if YAML_CONFIG.exists():
             backup(YAML_CONFIG)
@@ -409,7 +397,7 @@ def action_info(args):
     
     if args.path:
         print(str(action_file.absolute()))
-    elif args.data:
+    elif args.
         mtime = os.path.getmtime(action_file)
         print(datetime.fromtimestamp(mtime).isoformat())
     elif args.in_file:
@@ -420,6 +408,72 @@ def action_info(args):
         print(f"Путь: {action_file.absolute()}")
         print(f"Обновлено: {datetime.fromtimestamp(os.path.getmtime(action_file)).isoformat()}")
         print(f"Размер: {os.path.getsize(action_file)} байт")
+
+def action_run(args):
+    """Запуск действия через ROS topic по имени действия"""
+    check_ros()
+    
+    action_name = args.ACTION.strip()
+    
+    # Проверяем существование YAML конфига
+    if not YAML_CONFIG.exists():
+        print(f"Файл конфигурации не найден: {YAML_CONFIG}")
+        return
+    
+    # Читаем YAML файл
+    try:
+        with open(YAML_CONFIG, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Ошибка чтения YAML: {e}")
+        return
+    
+    # Ищем сопоставление действий
+    actions_match = config.get('robohead_controller_actions_match', {})
+    
+    if not actions_match:
+        print("Не найдено сопоставлений действий в robohead_controller_actions_match")
+        return
+    
+    # Ищем слово по имени действия
+    found_word = None
+    found_action_path = None
+    
+    for word, action_path in actions_match.items():
+        # action_path выглядит как "robohead_controller_actions.std_smile.action"
+        # Нам нужно найти std_smile
+        action_parts = action_path.split('.')
+        if len(action_parts) >= 2:
+            action_short_name = action_parts[1]  # std_smile
+            if action_short_name == action_name or action_path.endswith(action_name + '.action'):
+                found_word = word
+                found_action_path = action_path
+                break
+    
+    if not found_word:
+        print(f"Действие '{action_name}' не найдено в конфигурации")
+        print("\nДоступные действия:")
+        for word, path in actions_match.items():
+            action_parts = path.split('.')
+            if len(action_parts) >= 2:
+                print(f"  - {action_parts[1]} (слово: '{word}')")
+        return
+    
+    print(f"Найдено действие: {action_name}")
+    print(f"Слово для активации: '{found_word}'")
+    print(f"Путь: {found_action_path}")
+    
+    # Публикуем команду в ROS topic
+    print(f"\nОтправка команды в ROS topic...")
+    ros_cmd = f'rostopic pub /robohead_controller/voice_recognizer_pocketsphinx/cmds_recognizer/commands std_msgs/String "data: \'{found_word}\'"'
+    
+    try:
+        run_cmd(ros_cmd)
+        print(f"Команда отправлена: {found_word}")
+        print("Действие должно выполниться в ближайшее время")
+    except Exception as e:
+        print(f"Ошибка отправки команды: {e}")
+        print("Убедитесь что ROS запущен и robohead_controller активен")
 
 def check_int(value, min_val=0, max_val=100):
     try:
@@ -439,10 +493,12 @@ def main():
 Примеры:
   robohead core restart --debug
   robohead core get_img --pack
-  robohead core get_img --device /dev/sdc --output backup.img --2pack
-  robohead config speakers set_volume 75 --now
+  robohead core get_img --device /dev/sdc --output /media/usb/backup.img --2pack
+  robohead config speakers set_volume 75
+  robohead config speakers set_volume 75 --standart
   robohead config words set_activation_word привет --act_volume 35
   robohead action create smile --update-dictionary
+  robohead action run std_smile
   robohead action list
 
 Документация: https://docs.voltbro.ru
@@ -466,7 +522,7 @@ def main():
     
     p_get_img = core_sub.add_parser('get_img', help='Создать образ SD-карты')
     p_get_img.add_argument('--device', help='Устройство SD-карты (например, /dev/sdc)')
-    p_get_img.add_argument('--output', help='Имя выходного файла (без пути)')
+    p_get_img.add_argument('--output', help='Полный путь к выходному файлу')
     p_get_img.add_argument('--pack', action='store_true', help='Сжать образ через PiShrink')
     p_get_img.add_argument('--2pack', action='store_true', help='Сжать + архивировать в gzip')
     p_get_img.set_defaults(func=core_get_img)
@@ -490,7 +546,7 @@ def main():
     p_vol = sp_sub.add_parser('set_volume', help='Установить уровень громкости')
     p_vol.add_argument('VOLUME', nargs='?', type=lambda x: check_int(x, 0, 100), help='Уровень громкости (0-100)')
     p_vol.add_argument('--default', action='store_true', help='Установить стандартную громкость (50%%)')
-    p_vol.add_argument('--now', action='store_true', help='Применить сейчас (текущий сеанс)')
+    p_vol.add_argument('--now', action='store_true', help='Применить сейчас (по умолчанию всегда применяется)')
     p_vol.add_argument('--standart', action='store_true', help='Сохранить для автозапуска')
     p_vol.set_defaults(func=set_volume)
 
@@ -547,6 +603,10 @@ def main():
     p_info.add_argument('--data', action='store_true', help='Показать только дату')
     p_info.add_argument('--in-file', action='store_true', help='Показать содержимое файла')
     p_info.set_defaults(func=action_info)
+    
+    p_run = action_sub.add_parser('run', help='Запустить действие через ROS topic')
+    p_run.add_argument('ACTION', help='Имя действия (например, std_smile)')
+    p_run.set_defaults(func=action_run)
 
     args = parser.parse_args()
     
